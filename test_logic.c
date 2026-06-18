@@ -1,10 +1,10 @@
 /* it.massirito.pspobd2 - PSP OBD2 diagnostics & telemetry
  * (c) massirito. Homebrew non firmato crittograficamente: gira su CFW/HEN.
- * File: test_logic.c  |  Modulo: harness host gcc per obd/fuel/cost/accel/json
+ * File: test_logic.c  |  Modulo: harness host gcc per obd/fuel/cost/accel/json/dtc_db
  *
  * Compila con:
  *   gcc -Wall -Wextra -o test_logic test_logic.c obd.c fuel.c cost.c accel.c \
- *       json.c appconfig.c profile.c -lm && ./test_logic
+ *       json.c appconfig.c profile.c dtc_db.c -lm && ./test_logic
  *
  * Non include nessun header PSP-specifico.
  */
@@ -20,6 +20,7 @@
 #include "json.h"
 #include "profile.h"
 #include "appconfig.h"
+#include "dtc_db.h"
 
 static int s_pass = 0, s_fail = 0;
 
@@ -311,6 +312,68 @@ static void test_maf_formula(void) {
     CHECK_FLOAT("L/100 at 64kmh", l100, 9.86f, 0.1f);
 }
 
+/* ---- DTC database ---- */
+static void test_dtc_db(void) {
+    printf("=== DTC database ===\n");
+
+    /* Database non vuoto */
+    CHECK("db non vuoto", dtc_db_count > 0);
+
+    /* Codici generici standard */
+    CHECK("P0301 trovato", dtc_lookup("P0301") != NULL);
+    CHECK("P0171 trovato", dtc_lookup("P0171") != NULL);
+    CHECK("P0420 trovato", dtc_lookup("P0420") != NULL);
+    CHECK("P0011 trovato", dtc_lookup("P0011") != NULL);
+
+    /* Codici Mazda MX-5 NC specifici */
+    CHECK("P2004 IMRC",    dtc_lookup("P2004") != NULL);
+    CHECK("P2006 IMRC",    dtc_lookup("P2006") != NULL);
+    CHECK("P1260 imm.",    dtc_lookup("P1260") != NULL);
+    CHECK("P1170 O2",      dtc_lookup("P1170") != NULL);
+
+    /* Contenuto descrizioni */
+    const char *d301 = dtc_lookup("P0301");
+    CHECK("P0301 desc contiene cil.1",
+          d301 && strstr(d301, "cilindro 1") != NULL);
+
+    const char *d2004 = dtc_lookup("P2004");
+    CHECK("P2004 desc contiene IMRC",
+          d2004 && strstr(d2004, "IMRC") != NULL);
+
+    const char *dvvt = dtc_lookup("P0011");
+    CHECK("P0011 desc contiene VVT",
+          dvvt && strstr(dvvt, "VVT") != NULL);
+
+    /* Lookup case-insensitive */
+    CHECK("lookup lowercase", dtc_lookup("p0301") != NULL);
+    CHECK("lookup spazi",     dtc_lookup("P 03 01") != NULL);
+
+    /* Codice non esistente */
+    CHECK("non esistente",    dtc_lookup("P9999") == NULL);
+    CHECK("NULL safe",        dtc_lookup(NULL) == NULL);
+
+    /* is_manufacturer */
+    CHECK("P1xxx = mfr",      dtc_is_manufacturer("P1260") == 1);
+    CHECK("P2xxx != mfr",     dtc_is_manufacturer("P2004") == 0);
+    CHECK("P0xxx != mfr",     dtc_is_manufacturer("P0301") == 0);
+
+    /* Tutti i codici hanno codice e descrizione non NULL */
+    int all_ok = 1;
+    for (int i = 0; i < dtc_db_count; i++) {
+        if (!dtc_db[i].code || !dtc_db[i].description) { all_ok = 0; break; }
+        if (dtc_db[i].code[0] == '\0' || dtc_db[i].description[0] == '\0')
+            { all_ok = 0; break; }
+    }
+    CHECK("tutti i record validi", all_ok);
+
+    /* Stampa quanti codici MX-5 NC ci sono */
+    int nc_count = 0;
+    for (int i = 0; i < dtc_db_count; i++)
+        if (dtc_db[i].mx5_nc) nc_count++;
+    printf("  Info: %d codici totali, %d specifici/rilevanti MX-5 NC\n",
+           dtc_db_count, nc_count);
+}
+
 int main(void) {
     printf("=== psOBD2 test_logic ===\n\n");
     test_obd();
@@ -321,6 +384,7 @@ int main(void) {
     test_profile();
     test_appconfig();
     test_maf_formula();
+    test_dtc_db();
 
     printf("\n=== RISULTATO: %d PASS, %d FAIL ===\n", s_pass, s_fail);
     return s_fail > 0 ? 1 : 0;

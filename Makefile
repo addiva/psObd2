@@ -6,7 +6,7 @@ TITLE  = "PSP OBD2 - massirito"
 
 # Sorgenti PSP (include moduli PSP-specifici)
 OBJS  = main.o net.o elm.o ui.o camera.o appconfig.o \
-        obd.o profile.o fuel.o cost.o accel.o json.o
+        obd.o profile.o fuel.o cost.o accel.o json.o dtc_db.o
 
 # Flag per il codice PSP
 CFLAGS  = -O2 -G0 -Wall -Wextra -DPSP_BUILD
@@ -33,7 +33,7 @@ PSPSDK = $(shell psp-config --pspsdk-path)
 include $(PSPSDK)/lib/build.mak
 
 # ---- Test host (gcc) ----
-TEST_SRCS = test_logic.c obd.c fuel.c cost.c accel.c json.c profile.c appconfig.c
+TEST_SRCS = test_logic.c obd.c fuel.c cost.c accel.c json.c profile.c appconfig.c dtc_db.c
 TEST_BIN  = test_logic
 
 test: $(TEST_SRCS)

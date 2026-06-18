@@ -4,6 +4,7 @@
  */
 #include "ui.h"
 #include "json.h"
+#include "dtc_db.h"
 #include <string.h>
 #include <stdio.h>
 #include <math.h>
@@ -363,20 +364,41 @@ static void draw_widget_dtc_list(const ui_state_t *ui, const widget_t *w) {
     draw_rect(w->x, w->y, w->w, w->h, COL_PANEL);
     draw_text(w->x + 4, w->y + 4, COL_DIMTEXT, "DTC");
     if (!ui->live.dtc_valid || ui->live.dtc_count == 0) {
-        draw_text(w->x + 4, w->y + 20, COL_GREEN, "Nessun DTC");
+        draw_text(w->x + 4, w->y + 20, COL_GREEN, "Nessun DTC rilevato");
         return;
     }
-    for (int i = 0; i < ui->live.dtc_count && i < 10; i++) {
-        char line[32];
-        snprintf(line, sizeof(line), "  %s", ui->live.dtcs[i]);
-        draw_text(w->x + 4, w->y + 20 + i * 16, COL_RED, line);
+    /* Mostra max 8 DTC con codice + descrizione su due righe */
+    int max_show = 8;
+    int row_h    = 22;
+    for (int i = 0; i < ui->live.dtc_count && i < max_show; i++) {
+        const char *code = ui->live.dtcs[i];
+        const char *desc = dtc_lookup(code);
+        int is_mfr       = dtc_is_manufacturer(code);
+        int y0 = w->y + 20 + i * row_h;
+
+        /* Codice in rosso; asterisco se manufacturer-specific */
+        char code_buf[16];
+        snprintf(code_buf, sizeof(code_buf), is_mfr ? " %s *" : " %s", code);
+        draw_text(w->x + 4, y0, COL_RED, code_buf);
+
+        /* Descrizione troncata in grigio chiaro */
+        if (desc) {
+            char desc_buf[64];
+            snprintf(desc_buf, sizeof(desc_buf), "  %.58s", desc);
+            draw_text(w->x + 4, y0 + 11, COL_DIMTEXT, desc_buf);
+        } else {
+            draw_text(w->x + 4, y0 + 11, COL_DIMTEXT, "  (codice non in database)");
+        }
     }
-    if (ui->live.dtc_count > 10) {
+    if (ui->live.dtc_count > max_show) {
         char more[32];
         snprintf(more, sizeof(more), "  +%d altri...",
-                 ui->live.dtc_count - 10);
-        draw_text(w->x + 4, w->y + 20 + 10 * 16, COL_DIMTEXT, more);
+                 ui->live.dtc_count - max_show);
+        draw_text(w->x + 4, w->y + 20 + max_show * row_h, COL_DIMTEXT, more);
     }
+    /* Legenda asterisco */
+    draw_text(w->x + 4, w->y + w->h - 10, COL_DIMTEXT,
+              "* = codice Mazda specifico, non standard OBD2");
 }
 
 static void draw_widget_cost_card(const ui_state_t *ui, const widget_t *w) {
