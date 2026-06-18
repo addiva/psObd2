@@ -5,3 +5,4 @@ test_logic
 *.elf
 EBOOT.PBP
 PARAM.SFO
+*.prx
