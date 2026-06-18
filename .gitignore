@@ -1,1 +1,7 @@
-
+# Binari compilati
+test_logic
+*.o
+*.a
+*.elf
+EBOOT.PBP
+PARAM.SFO
