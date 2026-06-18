@@ -221,7 +221,7 @@ int main(int argc, char *argv[]) {
 
     /* Fuel log */
     refuel_log_init(&app->refuel);
-    char fpath[256];
+    char fpath[320];
     fuel_csv_path(app, fpath, sizeof(fpath));
     refuel_load_csv(&app->refuel, fpath);
 

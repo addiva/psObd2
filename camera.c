@@ -13,15 +13,11 @@
 #include <pspusbcam.h>
 #include <pspjpeg.h>
 #include <psprtc.h>
+#include <psptypes.h>
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <pspsdk.h>
-
-/* Nomi moduli USB - da verificare contro SDK locale */
-#define USB_BUS_DRIVER_NAME  "USBBusDriver"
-#define USB_CAM_DRIVER_NAME  "USBCamDriver"
-#define USB_CAM_PID          0x04A9  /* PID camera ufficiale PSP */
 
 /* Work buffer per il decoder MJPEG (dimensione consigliata SDK) */
 #define MJPEG_WORK_SIZE (64 * 1024)
@@ -46,10 +42,9 @@ static int capture_thread(SceSize args, void *argp) {
         }
 
         /* Decode MJPEG -> RGBA nel buffer back */
-        SceJpegErrorCode err = sceJpegDecodeMJpeg(
+        int err = sceJpegDecodeMJpeg(
             s_jpeg_buf, (SceSize)jpeg_len,
-            ctx->rgba_back, CAM_RGBA_SIZE,
-            0, NULL, 0);
+            ctx->rgba_back, 0);
 
         if (err >= 0) {
             /* Swap front/back */
@@ -69,9 +64,9 @@ int cam_init(cam_ctx_t *ctx) {
     ctx->rgba_back  = s_rgba_b;
 
     /* Avvia moduli USB */
-    if (sceUsbStart(USB_BUS_DRIVER_NAME, 0, NULL) < 0) return -1;
-    if (sceUsbStart(USB_CAM_DRIVER_NAME, 0, NULL) < 0) return -1;
-    if (sceUsbActivate(USB_CAM_PID) < 0)              return -1;
+    if (sceUsbStart(PSP_USBBUS_DRIVERNAME, 0, NULL) < 0) return -1;
+    if (sceUsbStart(PSP_USBCAM_DRIVERNAME, 0, NULL) < 0) return -1;
+    if (sceUsbActivate(PSP_USBCAM_PID) < 0)              return -1;
 
     /* Setup video */
     /* Struttura parametri: verificare con gli header locali */
@@ -79,22 +74,23 @@ int cam_init(cam_ctx_t *ctx) {
     memset(&param, 0, sizeof(param));
     param.size       = sizeof(param);
     param.resolution = PSP_USBCAM_RESOLUTION_320_240;
-    param.framerate  = PSP_USBCAM_FRAMERATE_15;
+    param.framerate  = PSP_USBCAM_FRAMERATE_15_FPS;
     param.wb         = PSP_USBCAM_WB_AUTO;
-    param.saturation = 0;
-    param.brightness = 0;
-    param.contrast   = 0;
-    param.sharpness  = 0;
-    param.effect     = PSP_USBCAM_EFFECT_NONE;
-    param.zoom       = 100;
-    param.mirror     = 0;
-    param.flip       = 0;
+    param.saturation = 128;
+    param.brightness = 128;
+    param.contrast   = 128;
+    param.sharpness  = 128;
+    param.effectmode = PSP_USBCAM_EFFECTMODE_NORMAL;
+    param.framesize  = CAM_JPEG_BUF_SIZE;
+    param.unk        = 0;
+    param.evlevel    = PSP_USBCAM_EVLEVEL_0_0;
 
     if (sceUsbCamSetupVideo(&param, s_mjpeg_work, MJPEG_WORK_SIZE) < 0)
         return -1;
 
     /* Init decoder MJPEG */
     if (sceJpegInitMJpeg() < 0) return -1;
+    if (sceJpegCreateMJpeg(CAM_WIDTH, CAM_HEIGHT) < 0) return -1;
 
     ctx->available = 1;
     return 0;
@@ -122,10 +118,11 @@ void cam_stop(cam_ctx_t *ctx) {
         s_thread_id = -1;
     }
     sceUsbCamStopVideo();
+    sceJpegDeleteMJpeg();
     sceJpegFinishMJpeg();
-    sceUsbDeactivate(USB_CAM_PID);
-    sceUsbStop(USB_CAM_DRIVER_NAME, 0, NULL);
-    sceUsbStop(USB_BUS_DRIVER_NAME, 0, NULL);
+    sceUsbDeactivate(PSP_USBCAM_PID);
+    sceUsbStop(PSP_USBCAM_DRIVERNAME, 0, NULL);
+    sceUsbStop(PSP_USBBUS_DRIVERNAME, 0, NULL);
     ctx->available = 0;
 }
 
@@ -140,14 +137,14 @@ int cam_snapshot(cam_ctx_t *ctx, const char *snap_dir,
     /* Nome file: snap_YYYYMMDD_HHMMSS_Xkmh_Yl100.jpg */
     u64 tick;
     sceRtcGetCurrentTick(&tick);
-    pspTime t;
+    ScePspDateTime t;
     sceRtcSetTick(&t, &tick);
     char fname[256];
     snprintf(fname, sizeof(fname),
              "%ssnap_%04d%02d%02d_%02d%02d%02d_%dkmh_%.1fl100.jpg",
              snap_dir ? snap_dir : "",
              t.year, t.month, t.day,
-             t.hour, t.minutes, t.seconds,
+             t.hour, t.minute, t.second,
              speed_kmh, l100);
 
     FILE *f = fopen(fname, "wb");

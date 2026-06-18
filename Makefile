@@ -17,8 +17,8 @@ ASFLAGS = $(CFLAGS)
 # Librerie PSP
 LIBS = -lpspgu -lpspge -lpspdisplay -lpspctrl \
        -lpspnet -lpspnet_inet -lpspnet_apctl \
-       -lpspusb -lpspusbcam \
-       -lpsputility -lpsprtc -lpspiofilemgr \
+       -lpspusb -lpspusbcam -lpspjpeg \
+       -lpsputility -lpsprtc -lpspuser \
        -lpspsdk -lpspkernel \
        -lm
 

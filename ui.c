@@ -16,6 +16,8 @@
 #include <pspgu.h>
 #include <pspgum.h>
 #include <pspctrl.h>
+#include <pspdebug.h>
+#include "net.h"
 
 /* VRAM layout: PSP display = 512*272*4 bytes */
 #define VRAM_BASE      0x04000000
@@ -24,6 +26,7 @@
 static unsigned int __attribute__((aligned(16))) s_disp_list[0x40000];
 static void *s_vram_draw;
 static void *s_vram_disp;
+static int g_gui_phase = 0; /* 0 = GU geometry, 1 = debug screen text */
 
 /* Helper: indirizzo VRAM */
 static inline void *vram_ptr(int offset) {
@@ -57,42 +60,38 @@ static void gu_init(void) {
     sceGuSync(0, 0);
     sceDisplayWaitVblankStart();
     sceGuDisplay(GU_TRUE);
+    pspDebugScreenInitEx(NULL, PSP_DISPLAY_PIXEL_FORMAT_8888, 0);
 }
 
 /* Vertex 2D senza texture */
 typedef struct { float x, y, z; } vert2d_t;
 
 static void draw_rect(int x, int y, int w, int h, unsigned int color) {
+    if (g_gui_phase != 0) return;
     sceGuColor(color);
     vert2d_t *v = (vert2d_t *)sceGuGetMemory(2 * sizeof(vert2d_t));
     v[0].x = (float)x;     v[0].y = (float)y;     v[0].z = 0;
     v[1].x = (float)(x+w); v[1].y = (float)(y+h); v[1].z = 0;
-    sceGumDrawArray(GU_SPRITES, GU_VERTEX_32BITF | GU_TRANSFORM_2D, 2, NULL, v);
+    sceGuDrawArray(GU_SPRITES, GU_VERTEX_32BITF | GU_TRANSFORM_2D, 2, NULL, v);
 }
 
-/* Testo: PSP non ha font hardware. Usiamo blit di bitmap font 8x8 minimale.
- * Per una UI "accattivante" si usa una texture con font pre-renderizzato.
- * Qui usiamo sceGuDebugPrint come fallback (debug-only) e un sistema
- * minimale di blit testo basato su debug font GE. */
 static void draw_text(int x, int y, unsigned int color, const char *txt) {
-    /* sceGuDebugPrint e' disponibile solo in build debug.
-     * In produzione si usa una texture atlas font + blit GU.
-     * Qui usiamo la variante disponibile nel SDK: */
-    (void)color; /* il debug print non supporta colore per ora */
-    sceGuDebugPrint(x, y, color, txt);
+    if (g_gui_phase != 1) return;
+    for (int i = 0; txt[i]; i++)
+        pspDebugScreenPutChar(x + i * 8, y, color, (u8)txt[i]);
 }
 
 static void draw_text_big(int x, int y, unsigned int color,
                           float scale, const char *txt) {
-    /* Scala moltiplicata via matrix GU per ingrandire il testo */
     (void)scale;
-    sceGuDebugPrint(x, y, color, txt);
+    if (g_gui_phase != 1) return;
+    for (int i = 0; txt[i]; i++)
+        pspDebugScreenPutChar(x + i * 8, y, color, (u8)txt[i]);
 }
 
-/* Arco/gauge semplice con sceGumDrawArray STRIPS (approssimazione poligonale) */
 static void draw_arc(int cx, int cy, int r, float from_deg, float to_deg,
                      int thickness, unsigned int color) {
-    /* Approssimazione: 32 segmenti */
+    if (g_gui_phase != 0) return;
     #define ARC_SEGS 32
     float step = (to_deg - from_deg) / ARC_SEGS;
     sceGuColor(color);
@@ -108,9 +107,9 @@ static void draw_arc(int cx, int cy, int r, float from_deg, float to_deg,
         v[i*2+1].y = cy + r * s;
         v[i*2+1].z = 0;
     }
-    sceGumDrawArray(GU_TRIANGLE_STRIP,
-                    GU_VERTEX_32BITF | GU_TRANSFORM_2D,
-                    (ARC_SEGS + 1) * 2, NULL, v);
+    sceGuDrawArray(GU_TRIANGLE_STRIP,
+                   GU_VERTEX_32BITF | GU_TRANSFORM_2D,
+                   (ARC_SEGS + 1) * 2, NULL, v);
     #undef ARC_SEGS
 }
 
@@ -341,7 +340,8 @@ static void draw_widget_linechart(const ui_state_t *ui, const widget_t *w) {
     for (int i = 0; i < n; i++) {
         float s = chart_get(cb, n - 1 - i);
         float pct = (s - w->min) / range;
-        if (pct < 0) pct = 0; if (pct > 1) pct = 1;
+        if (pct < 0) pct = 0;
+        if (pct > 1) pct = 1;
         int bar_h = (int)(pct * ph);
         draw_rect(bx + i, by + ph - bar_h, 1, bar_h, COL_ACCENT);
     }
@@ -474,9 +474,9 @@ static void draw_widget_camera(const ui_state_t *ui, const widget_t *w) {
     vv[0].x = (float)w->x; vv[0].y = (float)w->y; vv[0].z = 0;
     vv[1].u = CAM_WIDTH; vv[1].v = CAM_HEIGHT;
     vv[1].x = (float)(w->x + w->w); vv[1].y = (float)(w->y + w->h); vv[1].z = 0;
-    sceGumDrawArray(GU_SPRITES,
-                    GU_TEXTURE_32BITF | GU_VERTEX_32BITF | GU_TRANSFORM_2D,
-                    2, NULL, vv);
+    sceGuDrawArray(GU_SPRITES,
+                   GU_TEXTURE_32BITF | GU_VERTEX_32BITF | GU_TRANSFORM_2D,
+                   2, NULL, vv);
     sceGuDisable(GU_TEXTURE_2D);
 #else
     (void)ui;
@@ -740,30 +740,43 @@ int ui_handle_input(ui_state_t *ui) {
     return 0;
 }
 
-void ui_draw(ui_state_t *ui) {
-#ifdef PSP_BUILD
-    sceGuStart(GU_DIRECT, s_disp_list);
-    sceGuClearColor(COL_BG);
-    sceGuClearDepth(0);
-    sceGuClear(GU_COLOR_BUFFER_BIT | GU_DEPTH_BUFFER_BIT);
-#endif
-
-    /* Disegna i widget della dash corrente */
+static void ui_draw_all(ui_state_t *ui) {
     for (int i = 0; i < ui->widget_count; i++) {
         const widget_t *w = &ui->widgets[i];
         if (w->dash_id == ui->current_dash)
             draw_widget(ui, w);
     }
-
     draw_dash_nav(ui);
     draw_diag_buttons(ui);
     draw_accel_dash(ui);
+}
 
+void ui_draw(ui_state_t *ui) {
 #ifdef PSP_BUILD
+    /* Fase 0: geometria GU */
+    g_gui_phase = 0;
+    sceGuStart(GU_DIRECT, s_disp_list);
+    sceGuClearColor(COL_BG);
+    sceGuClearDepth(0);
+    sceGuClear(GU_COLOR_BUFFER_BIT | GU_DEPTH_BUFFER_BIT);
+    ui_draw_all(ui);
     sceGuFinish();
     sceGuSync(0, 0);
+
+    /* Fase 1: testo via debug screen sovrapposto al buffer corrente */
+    g_gui_phase = 1;
+    pspDebugScreenSetBase((u32 *)s_vram_draw);
+    ui_draw_all(ui);
+
+    /* Presenta il frame e scambia i buffer */
     sceDisplayWaitVblankStart();
     sceGuSwapBuffers();
+    void *tmp  = s_vram_draw;
+    s_vram_draw = s_vram_disp;
+    s_vram_disp = tmp;
+    g_gui_phase = 0;
+#else
+    ui_draw_all(ui);
 #endif
 }
 
