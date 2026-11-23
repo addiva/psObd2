@@ -21,6 +21,9 @@ typedef struct {
 
     /* Ultimo costo al litro inserito (per pre-riempire il form) */
     float last_eur_per_l;
+
+    /* Km percorsi dall'ultimo pieno (integrati dalla velocita' OBD) */
+    float km_since_fill;
 } app_config_t;
 
 /* Imposta valori di default */
@@ -32,7 +35,15 @@ int  appconfig_load(app_config_t *cfg, const char *path);
 /* Salva su path. Ritorna 0 OK, -1 errore. */
 int  appconfig_save(const app_config_t *cfg, const char *path);
 
-/* Crea la directory APP_DIR se non esiste (PSP: sceIoMkdir) */
+/* Crea la directory dell'app e snapshots/ se non esistono (PSP: sceIoMkdir) */
 int  appconfig_ensure_dir(const char *dir);
+
+/* Cartella dati dell'app, ricavata da argv[0] (es. "ef0:/PSP/GAME/x/EBOOT.PBP"
+ * su PSP Go). Se argv0 e' NULL/non valido resta APP_DIR. Termina con '/'. */
+void        appconfig_set_dir_from_argv(const char *argv0);
+const char *appconfig_dir(void);
+
+/* Compone appconfig_dir() + name in out */
+void        appconfig_path(const char *name, char *out, int len);
 
 #endif /* APPCONFIG_H */

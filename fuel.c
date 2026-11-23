@@ -17,6 +17,7 @@ void trip_update(trip_t *t, float lh, float speed, float dt_s) {
     double h = dt_s / 3600.0;
     t->sum_liters += lh * h;
     t->sum_km     += speed * h;
+    t->sum_s      += dt_s;
     t->last_dt_s   = dt_s;
 }
 
@@ -26,8 +27,8 @@ float trip_avg_l100(const trip_t *t) {
 }
 
 float trip_avg_lh(const trip_t *t) {
-    /* media integrata nel tempo: sum_liters / tempo_totale */
-    double h_tot = t->sum_km > 0 ? t->sum_km / 60.0 : 0;
+    /* media integrata nel tempo: sum_liters / ore totali */
+    double h_tot = t->sum_s / 3600.0;
     if (h_tot < 1e-6) return 0.0f;
     return (float)(t->sum_liters / h_tot);
 }

@@ -2,47 +2,53 @@
 # (c) massirito. Homebrew non firmato crittograficamente: gira su CFW/HEN.
 
 TARGET = pspobd2
-TITLE  = "PSP OBD2 - massirito"
 
-# Sorgenti PSP (include moduli PSP-specifici)
-OBJS  = main.o net.o elm.o ui.o camera.o appconfig.o \
-        obd.o profile.o fuel.o cost.o accel.o json.o dtc_db.o
+OBJS  = main.o net.o elm.o obdtask.o ui.o gfx.o font.o font8x8.o camera.o \
+        appconfig.o obd.o profile.o fuel.o cost.o accel.o json.o dtc_db.o
 
-# Flag per il codice PSP
-CFLAGS  = -O2 -G0 -Wall -Wextra -DPSP_BUILD
-CFLAGS += -I$(PSPDEV)/psp/sdk/include
+CFLAGS   = -O2 -G0 -Wall -Wextra -DPSP_BUILD
 CXXFLAGS = $(CFLAGS) -fno-exceptions -fno-rtti
-ASFLAGS = $(CFLAGS)
+ASFLAGS  = $(CFLAGS)
 
-# Librerie PSP
-LIBS = -lpspgu -lpspge -lpspdisplay -lpspctrl \
-       -lpspnet -lpspnet_inet -lpspnet_apctl \
-       -lpspusb -lpspusbcam -lpspjpeg \
-       -lpsputility -lpsprtc -lpspuser \
-       -lpspsdk -lpspkernel \
-       -lm
+# SOLO le librerie non gia' aggiunte da build.mak/specs del PSPSDK.
+# build.mak aggiunge: pspdebug pspdisplay pspge pspctrl pspnet pspnet_apctl
+# le specs aggiungono in coda: libc psputility psprtc pspnet_inet
+#                              pspnet_resolver pspsdk pspmodinfo pspuser
+# Ripeterle qui spezza le tabelle di import ("stubs out of order") e
+# -lpspkernel portava dentro import KERNEL: l'app non partiva su PSP reale.
+LIBS = -lpspgu -lpspusbcam -lpspusb -lpspjpeg -lpspwlan
 
-# PARAM.SFO / EBOOT.PBP
 BUILD_PRX        = 1
 PSP_FW_VERSION   = 660
 EXTRA_TARGETS    = EBOOT.PBP
-PSP_EBOOT_TITLE  = $(TITLE)
+PSP_EBOOT_TITLE  = PSP OBD2 - massirito
 PSP_EBOOT_ICON   = ICON0.PNG
 
+# I target di test su PC non richiedono il toolchain PSP
+ifeq ($(filter test preview clean-test,$(MAKECMDGOALS)),)
 PSPSDK = $(shell psp-config --pspsdk-path)
 include $(PSPSDK)/lib/build.mak
+endif
 
-# ---- Test host (gcc) ----
-TEST_SRCS = test_logic.c obd.c fuel.c cost.c accel.c json.c profile.c appconfig.c dtc_db.c
-TEST_BIN  = test_logic
+# Controllo: nessun import da librerie kernel nel PRX finale
+check-imports: $(TARGET).prx
+	@if psp-strings $(TARGET).prx | grep -E "ForKernel|_driver" ; then \
+		echo "ERRORE: il PRX importa librerie kernel"; exit 1; \
+	else echo "OK: solo librerie user-mode"; fi
 
-test: $(TEST_SRCS)
-	gcc -Wall -Wextra -O0 -g \
-	    -o $(TEST_BIN) $(TEST_SRCS) \
-	    -lm
-	./$(TEST_BIN)
+# ---- Test su PC (gcc) ----
+HOST_LOGIC = obd.c fuel.c cost.c accel.c json.c profile.c appconfig.c dtc_db.c
+HOST_ALL   = $(HOST_LOGIC) elm.c net.c obdtask.c ui.c gfx.c font.c font8x8.c camera.c
+
+test: test_logic.c $(HOST_LOGIC)
+	gcc -Wall -Wextra -O0 -g -o test_logic test_logic.c $(HOST_LOGIC) -lm
+	./test_logic
+
+# Anteprima PNG di tutte le schermate + test end-to-end con ELM327 simulato
+preview: tools/ui_preview.c $(HOST_ALL)
+	gcc -Wall -Wextra -O0 -g -I. -o ui_preview tools/ui_preview.c $(HOST_ALL) -lm
 
 clean-test:
-	rm -f $(TEST_BIN)
+	rm -f test_logic ui_preview
 
-.PHONY: test clean-test
+.PHONY: test preview clean-test check-imports

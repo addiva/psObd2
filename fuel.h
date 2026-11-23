@@ -10,6 +10,7 @@
 typedef struct {
     double sum_liters;   /* litri accumulati nel viaggio */
     double sum_km;       /* km percorsi nel viaggio */
+    double sum_s;        /* durata integrata (s) */
     double last_dt_s;    /* ultimo intervallo di campionamento (s) */
 } trip_t;
 

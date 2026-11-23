@@ -33,8 +33,16 @@ int appconfig_load(app_config_t *cfg, const char *path) {
     json_node_t *root = json_parse(buf);
     if (!root) return -1;
 
+    /* Formato piatto (accettato per comodita'): "elm_ip", "elm_port", ... */
+    const char *fip = json_str(root, "elm_ip", NULL);
+    if (fip) strncpy(cfg->elm_ip, fip, sizeof(cfg->elm_ip) - 1);
+    cfg->elm_port        = json_int(root, "elm_port",  cfg->elm_port);
+    cfg->elm_apctl_index = json_int(root, "elm_apctl", cfg->elm_apctl_index);
+    cfg->last_eur_per_l  = (float)json_num(root, "eur_per_l", cfg->last_eur_per_l);
+    cfg->km_since_fill   = (float)json_num(root, "km_since_fill", cfg->km_since_fill);
+
     json_node_t *elm = json_get(root, "elm");
-    if (elm) {
+    if (elm && elm->type == JSON_OBJECT) {
         const char *ip = json_str(elm, "ip", NULL);
         if (ip) strncpy(cfg->elm_ip, ip, sizeof(cfg->elm_ip) - 1);
         cfg->elm_port        = json_int(elm, "port",  cfg->elm_port);
@@ -55,6 +63,11 @@ int appconfig_load(app_config_t *cfg, const char *path) {
     }
 
     json_free();
+    /* Valori fuori range -> default */
+    if (cfg->elm_port <= 0 || cfg->elm_port > 65535) cfg->elm_port = ELM_DEFAULT_PORT;
+    if (cfg->elm_apctl_index < 1 || cfg->elm_apctl_index > 10)
+        cfg->elm_apctl_index = ELM_DEFAULT_APCTL;
+    if (cfg->km_since_fill < 0) cfg->km_since_fill = 0;
     return 0;
 }
 
@@ -70,6 +83,7 @@ int appconfig_save(const app_config_t *cfg, const char *path) {
     jw_obj_close(&w);
     jw_key_str(&w, "car_id",      cfg->car_id);
     jw_key_dbl(&w, "last_eur_l",  cfg->last_eur_per_l);
+    jw_key_dbl(&w, "km_since_fill", cfg->km_since_fill);
     jw_key_arr_open(&w, "accel_best");
     for (int i = 0; i < 7; i++) {
         char tmp[32];
@@ -97,12 +111,34 @@ int appconfig_save(const app_config_t *cfg, const char *path) {
     return 0;
 }
 
+static char s_app_dir[160] = APP_DIR;
+
+void appconfig_set_dir_from_argv(const char *argv0) {
+    if (!argv0) return;
+    const char *slash = strrchr(argv0, '/');
+    const char *colon = strchr(argv0, ':');
+    if (!slash || !colon || slash < colon) return;
+    int len = (int)(slash - argv0) + 1;
+    if (len <= 0 || len >= (int)sizeof(s_app_dir)) return;
+    memcpy(s_app_dir, argv0, (size_t)len);
+    s_app_dir[len] = '\0';
+}
+
+const char *appconfig_dir(void) { return s_app_dir; }
+
+void appconfig_path(const char *name, char *out, int len) {
+    snprintf(out, (size_t)len, "%s%s", s_app_dir, name ? name : "");
+}
+
 int appconfig_ensure_dir(const char *dir) {
 #ifdef PSP_BUILD
-    sceIoMkdir(dir, 0777);
-    char snap[256];
-    snprintf(snap, sizeof(snap), "%ssnapshots", dir);
-    sceIoMkdir(snap, 0777);
+    char path[192];
+    snprintf(path, sizeof(path), "%s", dir);
+    int l = (int)strlen(path);
+    if (l > 0 && path[l - 1] == '/') path[l - 1] = '\0';   /* niente '/' finale */
+    sceIoMkdir(path, 0777);
+    snprintf(path, sizeof(path), "%ssnapshots", dir);
+    sceIoMkdir(path, 0777);
 #else
     /* Su host: non serve creare directory per i test */
     (void)dir;

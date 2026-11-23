@@ -22,6 +22,7 @@
 #define CAM_RGBA_SIZE (CAM_WIDTH * CAM_HEIGHT * 4)
 
 typedef struct {
+    volatile int probing;    /* 1 = rilevamento in corso */
     int      available;      /* 1 = camera rilevata e inizializzata */
     int      running;        /* 1 = thread capture attivo */
 
@@ -30,21 +31,26 @@ typedef struct {
     uint8_t *rgba_back;      /* scritto dal thread capture */
     int      frame_ready;    /* flag: 1 = front pronto per blit */
     int      frame_id;       /* incrementato ad ogni nuovo frame */
+
+    /* Richiesta foto (UI -> thread camera) */
+    volatile int snap_req;
+    int      snap_speed;
+    float    snap_l100;
+    char     snap_dir[160];
+    volatile int snap_result; /* 1 OK, -1 errore, 0 nessuna */
+    char     snap_name[64];
 } cam_ctx_t;
 
-/* Inizializza il sottosistema camera. Ritorna 0 OK, -1 se assente/errore. */
-int  cam_init(cam_ctx_t *ctx);
-
-/* Avvia il thread di capture/decode.
- * Ritorna 0 OK, -1 errore. */
+/* Avvia in background rilevamento + cattura (non blocca l'avvio dell'app).
+ * Se la camera non c'e', il thread termina e available resta 0. */
 int  cam_start(cam_ctx_t *ctx);
 
 /* Ferma il thread di capture e rilascia le risorse. */
 void cam_stop(cam_ctx_t *ctx);
 
-/* Salva un fermo immagine JPEG in snap_dir con nome timestamp+telemetria.
- * speed_kmh e l100 vanno nel nome file come telemetria.
- * Ritorna 0 OK, -1 errore. */
+/* Richiede il salvataggio del prossimo frame JPEG in snap_dir
+ * (nome: snap_AAAAMMGG_HHMMSS_<v>kmh_<c>l100.jpg). Asincrono: esito in
+ * ctx->snap_result. Ritorna 0 se la richiesta e' accettata. */
 int  cam_snapshot(cam_ctx_t *ctx, const char *snap_dir,
                   int speed_kmh, float l100);
 

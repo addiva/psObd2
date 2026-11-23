@@ -374,6 +374,111 @@ static void test_dtc_db(void) {
            dtc_db_count, nc_count);
 }
 
+
+/* ---- Parser a righe (risposte reali ELM327) ---- */
+static void test_obd_frames(void) {
+    printf("\n[obd frames / multi-ECU / DTC]\n");
+    uint8_t d[8];
+    int n;
+    n = obd_extract_pid("SEARCHING...\r410C1AF8\r\r>", 1, 0x0C, d, 8);
+    CHECK("010C dopo SEARCHING", n == 2 && d[0] == 0x1A && d[1] == 0xF8);
+    n = obd_extract_pid("41 0D 32 \r>", 1, 0x0D, d, 8);
+    CHECK("010D con spazi", n == 1 && d[0] == 0x32);
+    n = obd_extract_pid("410C1AF8\r>", 1, 0x0D, d, 8);
+    CHECK("risposta di un altro PID scartata", n == 0);
+    n = obd_extract_pid("NO DATA\r\r>", 1, 0x0C, d, 8);
+    CHECK("NO DATA -> 0", n == 0);
+    n = obd_extract_pid("010C\r410C0FA0\r>", 1, 0x0C, d, 8);
+    CHECK("echo ignorato", n == 2 && d[0] == 0x0F);
+    n = obd_extract_pid("7F0112\r>", 1, 0x0C, d, 8);
+    CHECK("risposta negativa 7F -> 0", n == 0);
+
+    uint8_t m[4];
+    int any = obd_supported_mask("4100BE3EB813\r4100980000001\r4100800000 01\r>", 0, m);
+    CHECK("0100 piu' ECU: OR bitmask", any && m[0] == (0xBE | 0x98 | 0x80) && m[3] == 0x13);
+    any = obd_supported_mask("UNABLE TO CONNECT\r>", 0, m);
+    CHECK("0100 senza auto -> 0", any == 0);
+
+    uint8_t sup[16] = {0};
+    sup[0] = 0x18; sup[1] = 0x3B; sup[2] = 0x80; sup[3] = 0x11;   /* 0100 */
+    sup[4] = 0x00; sup[5] = 0x02; sup[6] = 0x00; sup[7] = 0x01;   /* 0120: 2F */
+    sup[8] = 0x00; sup[9] = 0x00; sup[10] = 0x00; sup[11] = 0x04; /* 0140: 5E */
+    CHECK("PID 0D supportato", obd_pid_is_supported(sup, 0x0D));
+    CHECK("PID 0C supportato", obd_pid_is_supported(sup, 0x0C));
+    CHECK("PID 2F (livello) supportato", obd_pid_is_supported(sup, 0x2F));
+    CHECK("PID 5E (fuel rate) supportato", obd_pid_is_supported(sup, 0x5E));
+    CHECK("PID 0A non supportato", !obd_pid_is_supported(sup, 0x0A));
+
+    char dtc[16][6];
+    n = obd_parse_dtcs("43010133\r>", 3, 1, dtc, 16);
+    CHECK("DTC CAN 1 codice (byte conteggio)", n == 1 && !strcmp(dtc[0], "P0133"));
+    n = obd_parse_dtcs("43010133\r>", 3, -1, dtc, 16);
+    CHECK("DTC CAN autodetect", n == 1 && !strcmp(dtc[0], "P0133"));
+    n = obd_parse_dtcs("00A\r0:430401330234\r1:03450456\r\r>", 3, 1, dtc, 16);
+    CHECK("DTC CAN multi-frame 4 codici", n == 4 && !strcmp(dtc[0], "P0133") &&
+          !strcmp(dtc[1], "P0234") && !strcmp(dtc[2], "P0345") && !strcmp(dtc[3], "P0456"));
+    n = obd_parse_dtcs("43 01 33 02 34 00 00\r43 03 45 00 00 00 00\r>", 3, 0, dtc, 16);
+    CHECK("DTC legacy 2 righe", n == 3 && !strcmp(dtc[2], "P0345"));
+    n = obd_parse_dtcs("4300\r>", 3, 1, dtc, 16);
+    CHECK("DTC CAN nessun codice", n == 0);
+    n = obd_parse_dtcs("43012004\r43012004\r>", 3, 1, dtc, 16);
+    CHECK("DTC duplicati da 2 ECU", n == 1 && !strcmp(dtc[0], "P2004"));
+    n = obd_parse_dtcs("4701C123\r>", 7, 1, dtc, 16);
+    CHECK("DTC pending mode 07 (U0123)", n == 1 && !strcmp(dtc[0], "U0123"));
+
+    CHECK_FLOAT("ATRV 12.4V", obd_parse_voltage("12.4V\r\r>"), 12.4f, 0.01f);
+    CHECK_FLOAT("ATRV assente", obd_parse_voltage("?\r>"), -1.0f, 0.01f);
+    CHECK("ATDPN A6 = CAN", obd_proto_is_can("A6\r>") == 1);
+    CHECK("ATDPN 3 = ISO9141", obd_proto_is_can("3\r>") == 0);
+    CHECK("ATDPN A0 = ignoto", obd_proto_is_can("A0\r>") == -1);
+}
+
+static void test_accel_feed(void) {
+    printf("\n[accel armato]\n");
+    accel_run_t r;
+    accel_arm(&r);
+    CHECK("armato non attivo", r.armed && !r.active);
+    accel_feed(&r, 30, 0.0f);
+    CHECK("in movimento all'armo: non parte", !r.active);
+    accel_feed(&r, 0, 1.0f);
+    accel_feed(&r, 0, 2.0f);   /* fermo: ultimo zero a t=2 */
+    accel_feed(&r, 10, 2.5f);
+    CHECK("parte dal movimento", r.active && r.hit[0]);
+    float t = 2.5f;
+    int done = 0;
+    for (int v = 20; v <= 210 && !done; v += 10) { t += 0.5f; done = accel_feed(&r, v, t); }
+    CHECK("corsa completa", done && r.hit[6]);
+    CHECK_FLOAT("0-20 misurato da t_zero", r.t_hit[1], 1.0f, 0.01f);
+    accel_arm(&r);
+    accel_feed(&r, 0, 0.0f);
+    accel_feed(&r, 60, 2.0f);
+    accel_feed(&r, 80, 3.0f);
+    done = accel_feed(&r, 60, 4.0f);
+    CHECK("rilascio chiude la corsa", done && !r.active && r.hit[2] && !r.hit[3]);
+}
+
+static void test_appconfig_flat(void) {
+    printf("\n[appconfig formato piatto + cartella]\n");
+    const char *tmp = "/tmp/psobd2_flat.json";
+    FILE *f = fopen(tmp, "w");
+    fputs("{ \"elm_ip\": \"192.168.4.1\", \"elm_port\": 23, \"elm_apctl\": 2,"
+          " \"car_id\": \"bmw_f30\", \"eur_per_l\": 1.85 }", f);
+    fclose(f);
+    app_config_t c;
+    int r = appconfig_load(&c, tmp);
+    CHECK("load piatto ok", r == 0);
+    CHECK("ip piatto", strcmp(c.elm_ip, "192.168.4.1") == 0);
+    CHECK("porta piatta", c.elm_port == 23);
+    CHECK("profilo piatto", c.elm_apctl_index == 2);
+    CHECK("auto", strcmp(c.car_id, "bmw_f30") == 0);
+    CHECK_FLOAT("prezzo", c.last_eur_per_l, 1.85f, 0.001f);
+    appconfig_set_dir_from_argv("ef0:/PSP/GAME/pspobd2/EBOOT.PBP");
+    CHECK("cartella da argv (PSP Go)", strcmp(appconfig_dir(), "ef0:/PSP/GAME/pspobd2/") == 0);
+    char p[192];
+    appconfig_path("config.json", p, sizeof(p));
+    CHECK("path config", strcmp(p, "ef0:/PSP/GAME/pspobd2/config.json") == 0);
+}
+
 int main(void) {
     printf("=== psOBD2 test_logic ===\n\n");
     test_obd();
@@ -385,6 +490,9 @@ int main(void) {
     test_appconfig();
     test_maf_formula();
     test_dtc_db();
+    test_obd_frames();
+    test_accel_feed();
+    test_appconfig_flat();
 
     printf("\n=== RISULTATO: %d PASS, %d FAIL ===\n", s_pass, s_fail);
     return s_fail > 0 ? 1 : 0;

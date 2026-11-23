@@ -1,156 +1,170 @@
 /* it.massirito.pspobd2 - PSP OBD2 diagnostics & telemetry
  * (c) massirito. Homebrew non firmato crittograficamente: gira su CFW/HEN.
- * File: ui.h  |  Modulo: sistema UI (GU 2D, widget, dash, grafici)
+ * File: ui.h  |  Modulo: sistema UI (widget, dashboard, form, input)
  */
 #ifndef UI_H
 #define UI_H
 
 #include "config.h"
+#include "live.h"
 #include "profile.h"
 #include "fuel.h"
 #include "cost.h"
 #include "accel.h"
 #include "camera.h"
-#include "elm.h"
+#include "obdtask.h"
+#include "appconfig.h"
 
-/* ---- Sorgenti metriche ---- */
-typedef enum {
-    SRC_RPM = 0,
-    SRC_SPEED,
-    SRC_COOLANT,
-    SRC_MAF,
-    SRC_FUEL_LEVEL,
-    SRC_THROTTLE,
-    SRC_L100_LIVE,
-    SRC_L100_TRIP,
-    SRC_LH_LIVE,
-    SRC_MIL,
-    SRC_DTC_COUNT,
-    SRC_FUEL_TOTAL_KM,
-    SRC_FUEL_TOTAL_EUR,
-    SRC_LAST_L100,
-    SRC_LAST_EUR,
-    SRC_AVG_L100,
-    SRC_AVG_EUR100,
-    SRC_ACCEL_TIME,    /* tempo corrente / best per la soglia selezionata */
-    SRC_COUNT
-} metric_src_t;
+/* ---- Dashboard ---- */
+enum {
+    DASH_DRIVE = 0, DASH_ENGINE, DASH_CHARTS, DASH_COSTS,
+    DASH_DIAG, DASH_ACCEL, DASH_CAMERA, DASH_SETUP
+};
 
-/* ---- Tipi widget ---- */
+/* ---- Tipi widget (valori salvati in layout.json) ---- */
 typedef enum {
-    W_NUMERIC,    /* valore grande + unita' */
-    W_GAUGE,      /* arco 0..max con zona rossa */
-    W_LINECHART,  /* serie storica scrollante */
-    W_BARCHART,   /* barre rifornimenti */
-    W_LAMP,       /* spia on/off */
-    W_DTC_LIST,   /* lista DTC */
-    W_COST_CARD,  /* riepilogo costi */
-    W_CAMERA      /* feed video camera */
+    W_NUMERIC,
+    W_GAUGE,
+    W_LINECHART,
+    W_BARCHART,
+    W_LAMP,
+    W_DTC_LIST,
+    W_COST_CARD,
+    W_CAMERA
 } widget_type_t;
 
-/* ---- Definizione widget ---- */
 typedef struct {
-    int          id;
+    int           id;
     widget_type_t type;
-    const char  *title;
-    metric_src_t source;
-    float        min, max;
-    float        red_zone;    /* soglia zona rossa (gauge) */
-    int          group_id;
-    int          visible;
-    int          dash_id;
-    int          x, y, w, h;
+    char          title[20];
+    metric_src_t  source;
+    float         min, max;
+    float         red_zone;
+    int           group_id;
+    int           visible;
+    int           dash_id;
+    int           x, y, w, h;
 } widget_t;
 
-/* Ring buffer per linechart */
 typedef struct {
     float samples[CHART_HIST_LEN];
     int   head;
     int   count;
 } chart_buf_t;
 
-/* ---- Stato live metriche (aggiornato dal loop OBD) ---- */
+/* ---- Form di inserimento (rifornimento / impostazioni) ---- */
+enum { FK_DIGITS, FK_ENUM };
+enum { FORM_NONE, FORM_REFUEL, FORM_SETUP };
+
 typedef struct {
-    float rpm;
-    int   speed;
-    int   coolant;
-    float maf;
-    float fuel_level;
-    int   throttle;
-    float lh_live;
-    float l100_live;
-    float l100_trip;
-    int   mil;
-    int   dtc_count;
-    char  dtcs[32][6];    /* max 32 DTC */
-    int   dtc_valid;      /* 1 = lista aggiornata */
+    char label[28];
+    int  kind;
+    char txt[24];              /* FK_DIGITS: cifre modificabili + separatori */
+    int  choice, nchoices;     /* FK_ENUM */
+    const char *choices[8];
+} field_t;
 
-    /* Telemetria camera overlay */
-    int   cam_speed;
-    float cam_l100;
-} live_t;
+typedef struct {
+    int     kind;              /* FORM_NONE = chiuso */
+    char    title[40];
+    int     nf, field, cursor;
+    field_t f[6];
+} form_t;
 
-/* ---- Stato UI globale ---- */
 typedef struct {
     int         current_dash;
-    int         config_mode;           /* 1 = widget selezionabile/spostabile */
-    int         selected_widget;
+    int         config_mode;
+    int         move_mode;
+    int         selected_widget;   /* INDICE in widgets[] */
+    int         layout_dirty;
 
     widget_t    widgets[WIDGET_MAX];
     int         widget_count;
 
-    chart_buf_t chart_speed;
-    chart_buf_t chart_l100;
-    chart_buf_t chart_rpm;
+    chart_buf_t chart_speed, chart_l100, chart_rpm;
+    unsigned int last_live_seq;
 
-    live_t      live;
+    /* Copie per il frame corrente */
+    live_t        live;
+    accel_run_t   accel;
+    accel_best_t  best;
+
+    /* Collegamenti (impostati da main) */
+    obd_task_t   *obd;
+    cam_ctx_t    *cam;
+    app_config_t *cfg;
+    refuel_log_t *refuel;
     cost_summary_t cost;
-    refuel_log_t  *refuel;            /* puntatore al log rifornimenti */
-    accel_run_t   *accel_run;
-    accel_best_t  *accel_best;
-    cam_ctx_t     *cam;
-    elm_ctx_t     *elm;
+    char          fuel_path[192];
+    char          layout_path[192];
+    char          config_path[192];
+    char          snap_dir[192];
 
-    /* Input */
-    unsigned int last_buttons;
-    unsigned int buttons;
+    /* Km dall'ultimo pieno = base + (trip_km - trip_at_fill) */
+    float         km_fill_base;
+    float         trip_at_fill;
+
+    /* Diagnostica */
+    int           dtc_scroll;
+    unsigned int  clear_confirm_ms;
+
+    form_t        form;
+
+    char          toast[96];
+    unsigned int  toast_ms;
+    unsigned int  toast_color;
+
+    unsigned int  buttons, last_buttons;
+    unsigned int  hold_ms, repeat_ms;
+    unsigned int  now_ms;
 } ui_state_t;
 
-/* ---- API UI ---- */
+int   ui_init(ui_state_t *ui);
+void  ui_set_default_layout(ui_state_t *ui);
+void  ui_load_layout(ui_state_t *ui, const char *layout_file);
+int   ui_save_layout(ui_state_t *ui, const char *layout_file);
 
-/* Inizializza GU e stato UI. Ritorna 0 OK. */
-int  ui_init(ui_state_t *ui);
+/* Copia lo stato pubblicato dal thread OBD e aggiorna i grafici */
+void  ui_sync(ui_state_t *ui);
 
-/* Carica il layout da file (o imposta il default).
- * profile puo' essere NULL (usa layout generico). */
-void ui_load_layout(ui_state_t *ui, const car_profile_t *profile,
-                    const char *layout_file);
+/* Input: ritorna 1 se l'utente chiede di uscire */
+int   ui_handle_input(ui_state_t *ui);
+/* Gestione di un set di tasti gia' letto (usata anche dai test su PC) */
+int   ui_process_buttons(ui_state_t *ui, unsigned int buttons);
 
-/* Salva il layout corrente in layout_file. */
-void ui_save_layout(ui_state_t *ui, const char *layout_file);
+void  ui_draw(ui_state_t *ui);
+void  ui_shutdown(ui_state_t *ui);
 
-/* Aggiorna i grafici con il nuovo campione live. Chiamata dal loop OBD. */
-void ui_push_sample(ui_state_t *ui, const live_t *live);
+/* Km dall'ultimo pieno (per salvarli in config) */
+float ui_km_since_fill(const ui_state_t *ui);
 
-/* Processa gli input controller e aggiorna ui->current_dash ecc.
- * Ritorna 1 se l'utente ha richiesto uscita dall'app. */
-int  ui_handle_input(ui_state_t *ui);
+/* Pulsanti (codici PSP_CTRL_*; stessi valori anche su PC) */
+#define BTN_SELECT   0x000001
+#define BTN_START    0x000008
+#define BTN_UP       0x000010
+#define BTN_RIGHT    0x000020
+#define BTN_DOWN     0x000040
+#define BTN_LEFT     0x000080
+#define BTN_L        0x000100
+#define BTN_R        0x000200
+#define BTN_TRIANGLE 0x001000
+#define BTN_CIRCLE   0x002000
+#define BTN_CROSS    0x004000
+#define BTN_SQUARE   0x008000
 
-/* Disegna il frame corrente (GU). */
-void ui_draw(ui_state_t *ui);
-
-/* Libera le risorse GU. */
-void ui_shutdown(ui_state_t *ui);
-
-/* ---- Colori tema scuro ---- */
-#define COL_BG       0xFF1A1A1A
-#define COL_PANEL    0xFF262626
-#define COL_ACCENT   0xFF00C0FF
-#define COL_TEXT     0xFFE0E0E0
-#define COL_DIMTEXT  0xFF808080
-#define COL_RED      0xFF4040FF   /* GU ABGR: FF=rosso -> 0xFF0000FF? check endian */
-#define COL_GREEN    0xFF00C040
-#define COL_YELLOW   0xFF00C0C0
+/* ---- Colori (formato PSP 0xAABBGGRR) ---- */
+#define COL_BG       0xFF141414
+#define COL_PANEL    0xFF242424
+#define COL_PANEL2   0xFF333333
+#define COL_TRACK    0xFF3C3C3C
+#define COL_ACCENT   0xFF00A5FF   /* arancio */
+#define COL_BLUE     0xFFFFB040   /* azzurro */
+#define COL_TEXT     0xFFE8E8E8
+#define COL_DIMTEXT  0xFF8A8A8A
+#define COL_RED      0xFF3030F0
+#define COL_GREEN    0xFF40C040
+#define COL_YELLOW   0xFF20D0E0
 #define COL_WHITE    0xFFFFFFFF
+#define COL_BLACK    0xFF000000
 
 #endif /* UI_H */

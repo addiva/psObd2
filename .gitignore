@@ -6,3 +6,9 @@ test_logic
 EBOOT.PBP
 PARAM.SFO
 *.prx
+
+# Strumenti host
+ui_preview
+*.ppm
+# Build pronta da copiare sulla Memory Stick
+!release/PSP/GAME/it.massirito.pspobd2/EBOOT.PBP

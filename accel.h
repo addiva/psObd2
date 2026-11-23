@@ -16,6 +16,11 @@ typedef struct {
     int   hit[ACCEL_THRESHOLDS_N];         /* 1 = soglia raggiunta */
     int   prev_speed;                      /* velocita' campione precedente */
     float prev_time_s;                     /* timestamp campione precedente */
+    /* Partenza da fermo (accel_feed) */
+    int   armed;                           /* 1 = in attesa della partenza */
+    int   have_zero;                       /* visto almeno un campione a 0 km/h */
+    float t_zero;                          /* ultimo istante a 0 km/h */
+    int   max_speed;
 } accel_run_t;
 
 typedef struct {
@@ -31,6 +36,16 @@ void accel_start(accel_run_t *r, float now_s);
 /* Aggiorna con nuovo campione velocita'. Interpola tra campioni per ridurre errore.
  * Ritorna 1 se tutte le soglie sono state raggiunte (run completato). */
 int  accel_update(accel_run_t *r, int speed_kmh, float now_s);
+
+/* Arma il cronometro: la misura parte da sola quando l'auto, ferma,
+ * inizia a muoversi (niente tempo di reazione incluso). */
+void accel_arm(accel_run_t *r);
+
+/* Campione velocita' per il cronometro armato/attivo.
+ * La corsa termina quando tutte le soglie sono raggiunte oppure se si
+ * rilascia (velocita' scende di 10 km/h sotto il massimo o torna a 0).
+ * Ritorna 1 quando una corsa si e' appena conclusa (aggiornare i best). */
+int  accel_feed(accel_run_t *r, int speed_kmh, float now_s);
 
 /* Aggiorna i best times se la corsa corrente ha battuto qualcosa */
 void accel_update_best(accel_best_t *best, const accel_run_t *r);

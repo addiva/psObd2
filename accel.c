@@ -46,6 +46,7 @@ int accel_update(accel_run_t *r, int speed_kmh, float now_s) {
 
     r->prev_speed  = speed_kmh;
     r->prev_time_s = now_s;
+    if (speed_kmh > r->max_speed) r->max_speed = speed_kmh;
 
     /* Verifica se tutte le soglie sono state raggiunte */
     all_hit = 1;
@@ -62,4 +63,26 @@ void accel_update_best(accel_best_t *best, const accel_run_t *r) {
         if (best->best[i] == 0.0f || r->t_hit[i] < best->best[i])
             best->best[i] = r->t_hit[i];
     }
+}
+
+void accel_arm(accel_run_t *r) {
+    accel_reset(r);
+    r->armed = 1;
+}
+
+int accel_feed(accel_run_t *r, int speed_kmh, float now_s) {
+    if (r->armed && !r->active) {
+        if (speed_kmh <= 0) { r->have_zero = 1; r->t_zero = now_s; return 0; }
+        if (!r->have_zero) return 0;          /* gia' in movimento: fermati prima */
+        float tz = r->t_zero;
+        accel_start(r, tz);                   /* azzera anche armed */
+        return accel_update(r, speed_kmh, now_s);
+    }
+    if (!r->active) return 0;
+    if (accel_update(r, speed_kmh, now_s)) return 1;
+    if (speed_kmh <= 0 || speed_kmh + 10 < r->max_speed) {
+        r->active = 0;                        /* rilascio: corsa conclusa */
+        return 1;
+    }
+    return 0;
 }
